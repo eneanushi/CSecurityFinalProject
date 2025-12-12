@@ -17,7 +17,7 @@ def main():
         print("2. Login existing uer")
         print("3. Exit")
 
-        choice = input("Choose opetion (1-3) ").strip()
+        choice = input("Choose option (1-3) ").strip()
 
         if choice == "1":
             setup_result = first_time_setup()
