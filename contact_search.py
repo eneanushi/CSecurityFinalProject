@@ -29,7 +29,7 @@ def cleanup_server():
                 server.close()
             except Exception:
                 pass
-
+#assign cleanup_server() to be run at program termination
 atexit.register(cleanup_server)
 
 
