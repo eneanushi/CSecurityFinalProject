@@ -43,7 +43,7 @@ def run_server():
     global server, SERVER_PORT
     HOST = "0.0.0.0"
     s = None
-
+    #FIXME is this supposed to change the port listening on if one port is already being listened to?
     for port in range(12345, 12355):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -339,10 +339,10 @@ def start_background_scanner():
 
 def scanner():
     while True:
+
         if not session.email:
             time.sleep(SCAN_INTERVAL)
             continue
-
         discovered = search_for_contacts()
         now = time.time()
 
@@ -352,6 +352,8 @@ def scanner():
                     # only add if we know this contact in our local contacts
                     # (this prevents showing random discovered users)
                     my_contacts = load_contacts()
+                    print(my_contacts)
+                    print(email)
                     if email in my_contacts:
                         online_contacts[email] = now
 
@@ -364,6 +366,7 @@ def scanner():
 
 # List online (mutual) contacts
 def list_online_contacts():
+    #online_contacts = search_for_contacts() #it might've been that the online contacts wasn't getting updated, and it was never looking
     with _lists_lock:
         if not online_contacts:
             print("No mutual contacts currently online")
