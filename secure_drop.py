@@ -49,7 +49,7 @@ def main():
 
         if command == "help":
             print('"add" -> Add a new contact')
-            print('"list all" -> List all users')
+            print('"list all" -> List all users') #TODO<-- command not implemented
             print('"list"     -> List all online contacts')
             print('"send"     -> Transfer file to contact')
             print('"exit"     -> Exit SecureDrop')
