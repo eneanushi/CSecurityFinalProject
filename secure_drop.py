@@ -14,7 +14,7 @@ def main():
         print("SecureDrop Main Menu")
         print("=" * 30)
         print("1. Register new User")
-        print("2. Login existing uer")
+        print("2. Login existing User")
         print("3. Exit")
 
         choice = input("Choose option (1-3) ").strip()
