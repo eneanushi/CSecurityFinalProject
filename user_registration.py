@@ -42,13 +42,19 @@ def register_user():
     save_private_key(private_key, password, f"{user_dir}/private_key.pem")
     save_public_key(public_key, f"{user_dir}/public_key.pem")
     
+    ca_private_key = load_ca_private_key()
+    user_cert = create_user_certificate(email, public_key, ca_private_key)
+    os.makedirs("data/certificate", exist_ok=True)
+    save_certificate(user_cert, f"data/certificate/{email}.crt")
+    
     # Store user data
     user_data = {
         "full_name": full_name,
         "email": email,
         "password_hash": base64.b64encode(password_hash).decode(),
         "salt": base64.b64encode(salt).decode(),
-        "public_key_path": f"{user_dir}/public_key.pem"
+        "public_key_path": f"{user_dir}/public_key.pem",
+        "user_cert_path": f"data/certificate/{email}.crt"
     }
     
     save_user_data(user_data)
