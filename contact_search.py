@@ -47,17 +47,14 @@ def run_server():
     for port in range(12345, 12355):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #this was causing it to just use the same port
             s.bind((HOST, port))
             s.listen(5)
             SERVER_PORT = port
             print(f"[Server] Listening on port: {port}")
             break
-        except OSError:
-            if s:
-                try: s.close()
-                except: pass
-            s = None
+        except OSError as e:
+            s.close()
             continue
 
     if s is None:
@@ -352,8 +349,6 @@ def scanner():
                     # only add if we know this contact in our local contacts
                     # (this prevents showing random discovered users)
                     my_contacts = load_contacts()
-                    print(my_contacts)
-                    print(email)
                     if email in my_contacts:
                         online_contacts[email] = now
 

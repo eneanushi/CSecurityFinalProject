@@ -35,9 +35,9 @@ def login_user():
     while attempts < max_attempts:
         print("Enter Email Address:", end=" ")
         email = input().lower()
-        
-        password = getpass.getpass("Enter Password: ")
-        
+        #FIXME change I made for testing:
+        #password = getpass.getpass("Enter Password: ")
+        password = input("Enter Password: ")
         if authenticate_user(email, password):
             print("Welcome to SecureDrop.")
             print('Type "help" For Commands.')
