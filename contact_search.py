@@ -183,8 +183,8 @@ def receive_file(sock, sender_email):
     filename = recv_block(sock).decode()
     filesize = int.from_bytes(recv_block(sock), "big")
 
-    os.makedirs(f"received_files{session.full_name}", exist_ok=True) #TODO change made so that each user has their own received directory
-    path = os.path.join(f"received_files{session.full_name}", filename)
+    os.makedirs(f"received_files_{session.getName()}", exist_ok=True) #TODO change made so that each user has their own received directory
+    path = os.path.join(f"received_files_{session.getName()}", filename)
 
     received = 0
 

@@ -24,6 +24,9 @@ class UserSession:
         self.public_key = None
         self.master_key = None
 
+    def getName(self):
+        return str(self.full_name).replace(" ", "_")
+
 # Global session object
 session = UserSession()
 
