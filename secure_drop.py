@@ -1,5 +1,6 @@
 
 import os
+
 from user_registration import register_user
 from user_login import login_user, session
 from contacts import add_contact
@@ -70,6 +71,13 @@ def main():
             from contact_search import cleanup_server
             cleanup_server()  # signal server/scanner threads to stop
             return
+
+        #FIXME this si for debugging
+        elif command == "test list":
+            import time
+            while True:
+                list_online_contacts()
+                time.sleep(0.1)
 
         else:
             print(f'Unknown command: "{command}". Type "help" for commands.')

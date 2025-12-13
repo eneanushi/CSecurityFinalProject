@@ -57,8 +57,8 @@ def run_server():
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #this was causing it to just use the same port
             s.bind((HOST, port))
-            s.listen(5)
-            s.settimeout(1)
+            s.listen(10)
+            s.settimeout(10)
             SERVER_PORT = port
             print(f"[Server] Listening on port: {port}")
             break
@@ -307,11 +307,6 @@ def handle_request(client_socket):
             client_socket.close()
         except Exception:
             pass
-
-        if their_email:
-            with _lists_lock:
-                online_contacts.pop(their_email, None)
-
 def connect_and_authenticate(ip, port):
     """
     Create a socket, authenticate as client, and return (email, socket).
@@ -552,11 +547,12 @@ def scanner():
 
             for info in online_contacts.values():
                 timeConnected = info[1]
-                if now - timeConnected > OFFLINE_TIMEOUT:
+                if (now - timeConnected) > OFFLINE_TIMEOUT:
+
                     stale.append(email)
 
-            for e in stale:
-                online_contacts.pop(e)
+            for email in stale:
+                online_contacts.pop(email)
 
         time.sleep(SCAN_INTERVAL)
 
@@ -569,7 +565,7 @@ def list_online_contacts():
         true if there are contacts online
         """
     with _lists_lock:
-        if not online_contacts:
+        if len(online_contacts.keys()) == 0:
             #no online contacts
             print("No mutual contacts currently online")
             return False
@@ -580,7 +576,7 @@ def list_online_contacts():
             if email not in my_contacts:
                 continue
             name = my_contacts[email].get("full_name", email)
-            age = int(now - online_contacts[email][1])
+            age = (now - online_contacts[email][1])
             print(f"* {name} ({email}) — last seen {age}s ago")
     #only gets here if there were online contacts found
     return True
