@@ -50,7 +50,6 @@ def run_server():
             s.bind((HOST, port))
             s.listen(5)
             SERVER_PORT = port
-            s.connect_ex()
             print(f"[Server] Listening on port: {port}")
             break
         except OSError as e:
@@ -366,8 +365,10 @@ def search_for_contacts():
     def probe(ip, port):
         if port == SERVER_PORT:
             return
-        email, foundSock = check_contact_certificate_exchange(ip, port)
-        if foundSock and email:
+        contact = check_contact_certificate_exchange(ip, port)
+        if contact is not None:
+            email, foundSock = contact
+            # they both exist :)
             with lock:
                 results[email] = foundSock
 
