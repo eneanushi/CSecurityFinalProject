@@ -19,7 +19,7 @@ _shutdown_event = threading.Event() #event to extra triple make sure threads shu
 
 
 SCAN_INTERVAL = 5
-OFFLINE_TIMEOUT = 10  
+OFFLINE_TIMEOUT = 10.0
 
 
 # Server cleanup on exit
@@ -58,7 +58,7 @@ def run_server():
             #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #this was causing it to just use the same port
             s.bind((HOST, port))
             s.listen(5)
-            #s.settimeout(1)
+            s.settimeout(1)
             SERVER_PORT = port
             print(f"[Server] Listening on port: {port}")
             break
@@ -78,6 +78,8 @@ def run_server():
             try:
                 client_socket, _ = server.accept()
                 threading.Thread(target=handle_request, args=(client_socket,), daemon=True).start()
+            except socket.timeout:
+                continue
             except OSError:
                 break
             except Exception:
@@ -199,122 +201,178 @@ def receive_file(sock, sender_email):
 
     print(f"[File] Received {filename} from {sender_email}")
 
+def authenticate_socket_as_server(sock):
+    """
+    Perform mutual authentication on an already-connected socket.
 
-# Mutual-consent protocol (server side)
-def handle_request(client_socket):
-    """runs authentication between the sever and the client socket, then listens
-
-    performs the authentication handshake between server and the client socket, then listens on the socket to receive
-
-    Args:
-       client_socket (socket): the client socket to be authenticated on and then listened to
     Returns:
-        none
-       """
+        their_email (str)
+
+    Raises:
+        Exception if authentication fails
+    """
+    sock.settimeout(6)
+
+    # Step 1: send nonce
+    nonce = os.urandom(16)
+    send_block(sock, nonce)
+
+    # Step 2: receive signed nonce + certificate
+    signed_nonce = recv_block(sock)
+    cert_bytes = recv_block(sock)
+
+    if not signed_nonce or not cert_bytes:
+        raise Exception("Missing auth data")
+
+    try:
+        cert_text = cert_bytes.decode().strip()
+    except Exception:
+        raise Exception("Invalid certificate encoding")
+
+    if not cert_text.startswith("-----BEGIN CERTIFICATE-----"):
+        raise Exception("Invalid certificate format")
+
+    # Verify certificate
+    ca_public = load_ca_public_key()
+    if not verify_certificate_data(cert_text, ca_public):
+        raise Exception("Certificate verification failed")
+
+    their_email = extract_email_from_cert(cert_text)
+    if not their_email:
+        raise Exception("No email in certificate")
+
+    client_public_key = load_public_key_cert_from_text(cert_text)
+
+    # Verify nonce signature
+    if not verify_signature_bytes(nonce, signed_nonce, client_public_key):
+        raise Exception("Invalid nonce signature")
+
+    # Authorization: must be in contacts
+    if their_email not in load_contacts():
+        raise Exception("Unauthorized contact")
+
+    # Step 3: send server proof
+    cert_path = f"data/certificate/{session.email}.crt"
+    if not os.path.exists(cert_path):
+        raise Exception("Server certificate missing")
+
+    server_cert = read_certificate_file(cert_path)
+    send_block(sock, server_cert)
+
+    server_email_bytes = session.email.encode()
+    server_sig = sign_bytes(server_email_bytes, session.private_key)
+    send_block(sock, server_sig)
+
+    # Step 4: receive client confirmation
+    client_conf_sig = recv_block(sock)
+    if not client_conf_sig:
+        raise Exception("Client confirmation missing")
+
+    if not verify_signature_bytes(
+        server_email_bytes, client_conf_sig, client_public_key
+    ):
+        raise Exception("Client confirmation invalid")
+
+    return their_email
+
+
+def handle_request(client_socket):
+    """
+    Authenticate the client socket, then handle commands.
+    """
     their_email = None
     try:
-        client_socket.settimeout(6)
+        their_email = authenticate_socket_as_server(client_socket)
 
-        # Step 1: send nonce
-        nonce = os.urandom(16)
-        send_block(client_socket, nonce)
-
-        # Step 2: receive signed_nonce and client cert
-        signed_nonce = recv_block(client_socket)
-        if not signed_nonce:
-            return
-
-        cert_bytes = recv_block(client_socket)
-        if not cert_bytes:
-            return
-
-        # cert as text
-        try:
-            cert_text = cert_bytes.decode().strip()
-        except Exception:
-            return
-
-        if not cert_text.startswith("-----BEGIN CERTIFICATE-----"):
-            return
-
-        # Verify certificate
-        ca_public = load_ca_public_key()
-        if not verify_certificate_data(cert_text, ca_public):
-            return
-
-        their_email = extract_email_from_cert(cert_text)
-        if not their_email:
-            return
-
-        client_public_key = load_public_key_cert_from_text(cert_text)
-
-        # Verify signature over nonce
-        if not verify_signature_bytes(nonce, signed_nonce, client_public_key):
-            return
-
-        # Save certificate locally for future encrypted sends
-        try:
-            save_certificate_from_data(cert_text, their_email)
-        except Exception:
-            pass
-
-        # Step 4: check if server has them in our contacts
-        my_contacts = load_contacts()
-        if their_email not in my_contacts:
-            # Not in our contacts: do not proceed with mutual confirmation
-            return
-
-        # Step 4b: send our certificate and signature over our email
-        our_cert_path = f"data/certificate/{session.email}.crt"
-        if not os.path.exists(our_cert_path):
-            # can't proceed without our certificate saved
-            return
-
-        # Read our certificate bytes
-        our_cert_bytes = read_certificate_file(our_cert_path)
-
-        # Create a signature over our email to let client verify identity (server proof)
-        # Ensure session.email is a string
-        if not isinstance(session.email, str):
-            return  # Invalid session state
-
-        server_email_bytes = session.email.encode()
-        server_sig = sign_bytes(server_email_bytes, session.private_key)
-
-        # Send server certificate then signature (both length-prefixed)
-        send_block(client_socket, our_cert_bytes)
-        send_block(client_socket, server_sig)
-
-        # Step 5: receive client's confirmation signature over server_email
-        client_conf_sig = recv_block(client_socket)
-        if not client_conf_sig:
-            return
-
-        # Step 6: verify client's confirmation signature using client's public key
-        if not verify_signature_bytes(server_email_bytes, client_conf_sig, client_public_key):
-            return
-
-        # Mutual confirmed: mark them online
         with _lists_lock:
-            #add the email to online contacts, with the connected socket and the time connected
             online_contacts[their_email] = (client_socket, time.time())
 
-    except Exception:
-        # silent on purpose; caller code previously relied on silent failures
-        return
-    # AFTER mutual authentication succeeds
-    while not _shutdown_event.is_set():
+        # Command loop
+        while not _shutdown_event.is_set():
             cmd = recv_block(client_socket)
             if not cmd:
                 break
 
             if cmd == b"FILE":
-                print(f"received a file send cmd from {their_email}")
                 receive_file(client_socket, their_email)
 
             elif cmd == b"QUIT":
                 break
 
+    except Exception as e:
+        print(f"[Auth / Connection error] {e}")
+
+    finally:
+        try:
+            client_socket.close()
+        except Exception:
+            pass
+
+        if their_email:
+            with _lists_lock:
+                online_contacts.pop(their_email, None)
+
+def connect_and_authenticate(ip, port):
+    """
+    Create a socket, authenticate as client, and return (email, socket).
+
+    Returns:
+        (server_email, sock) on success
+        None on failure
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(6)
+
+    try:
+        sock.connect((ip, port))
+
+        # Receive nonce
+        nonce = recv_block(sock)
+        if not nonce:
+            raise Exception("No nonce")
+
+        # Send signed nonce + certificate
+        signature = sign_bytes(nonce, session.private_key)
+        send_block(sock, signature)
+
+        cert_path = f"data/certificate/{session.email}.crt"
+        with open(cert_path, "rb") as f:
+            send_block(sock, f.read())
+
+        # Receive server certificate + signature
+        serv_cert_bytes = recv_block(sock)
+        serv_sig = recv_block(sock)
+        if not serv_cert_bytes or not serv_sig:
+            raise Exception("Server proof missing")
+
+        serv_cert_text = serv_cert_bytes.decode().strip()
+
+        ca_public = load_ca_public_key()
+        if not verify_certificate_data(serv_cert_text, ca_public):
+            raise Exception("Invalid server certificate")
+
+        server_email = extract_email_from_cert(serv_cert_text)
+        server_public_key = load_public_key_cert_from_text(serv_cert_text)
+
+        server_email_bytes = server_email.encode()
+        if not verify_signature_bytes(
+            server_email_bytes, serv_sig, server_public_key
+        ):
+            raise Exception("Server signature invalid")
+
+        # Confirm mutual
+        conf_sig = sign_bytes(server_email_bytes, session.private_key)
+        send_block(sock, conf_sig)
+
+        return server_email, sock
+
+    except Exception as e:
+        print(f"[Client auth failed] {e}")
+        try:
+            sock.close()
+        except Exception:
+            pass
+        return None
 
 
 # Client-side mutual exchange (for discovery)
@@ -334,7 +392,7 @@ def check_contact_certificate_exchange(ip, port):
         failure: None
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(3)
+    sock.settimeout(5)
     try:
         sock.connect((ip, port))
 
@@ -492,17 +550,13 @@ def scanner():
             #handle stale connections for security
             stale = []
 
-            for email, info in online_contacts.items():
-                if isinstance(info, tuple) and len(info) == 2:
-                    _, ts = info
-                else:
-                    ts = info
-
-                if now - ts > OFFLINE_TIMEOUT:
+            for info in online_contacts.values():
+                timeConnected = info[1]
+                if now - timeConnected > OFFLINE_TIMEOUT:
                     stale.append(email)
 
             for e in stale:
-                online_contacts.pop(e, None)
+                online_contacts.pop(e)
 
         time.sleep(SCAN_INTERVAL)
 
@@ -526,7 +580,7 @@ def list_online_contacts():
             if email not in my_contacts:
                 continue
             name = my_contacts[email].get("full_name", email)
-            age = int(now - my_contacts[1])
+            age = int(now - online_contacts[email][1])
             print(f"* {name} ({email}) — last seen {age}s ago")
     #only gets here if there were online contacts found
     return True

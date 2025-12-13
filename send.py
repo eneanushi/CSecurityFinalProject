@@ -44,6 +44,7 @@ def send_file():
 
     #> have the contact email, the file to send, now I just send it right?
 
+    contact_search.send_file(contact_search.online_contacts[receiver_email][0], file_name)
 
 
 
