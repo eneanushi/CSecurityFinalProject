@@ -439,7 +439,6 @@ def scanner():
 
 # List online (mutual) contacts
 def list_online_contacts():
-    #online_contacts = search_for_contacts() #it might've been that the online contacts wasn't getting updated, and it was never looking
     with _lists_lock:
         if not online_contacts:
             print("No mutual contacts currently online")
