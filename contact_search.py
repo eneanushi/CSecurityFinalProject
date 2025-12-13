@@ -84,7 +84,10 @@ def run_server():
 def recv_all(sock, n):
     data = b""
     while len(data) < n:
-        packet = sock.recv(n - len(data))
+        try:
+            packet = sock.recv(n - len(data))
+        except socket.timeout:
+            return None  # timed out
         if not packet:
             return None
         data += packet
@@ -406,7 +409,7 @@ def scanner():
                         online_contacts[email] = (discovered[email], now) # item is a list, with the first entry the live port, and the second entry the time
 
             # remove stale entries
-            stale = [e for e, ts in online_contacts.items() if now - ts > OFFLINE_TIMEOUT]
+            stale = [e for e, (_, ts) in online_contacts.items() if now - ts > OFFLINE_TIMEOUT]
             for e in stale:
                 online_contacts.pop(e, None)
 
@@ -424,7 +427,7 @@ def list_online_contacts():
         now = time.time()
 
         print("Online contacts (mutual only):")
-        for email, last_seen in sorted(online_contacts.items()):
+        for email, (_, last_seen) in sorted(online_contacts.items()):
             if email not in my_contacts:
                 continue
             name = my_contacts[email].get("full_name", email)
