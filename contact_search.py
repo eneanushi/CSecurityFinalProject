@@ -43,7 +43,6 @@ def run_server():
     global server, SERVER_PORT
     HOST = "0.0.0.0"
     s = None
-    #FIXME is this supposed to change the port listening on if one port is already being listened to?
     for port in range(12345, 12355):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -51,6 +50,7 @@ def run_server():
             s.bind((HOST, port))
             s.listen(5)
             SERVER_PORT = port
+            s.connect_ex()
             print(f"[Server] Listening on port: {port}")
             break
         except OSError as e:
@@ -81,7 +81,7 @@ def run_server():
             except: pass
             server = None
 
-# (exact bytes)
+# receive all
 def recv_all(sock, n):
     data = b""
     while len(data) < n:
@@ -104,6 +104,41 @@ def recv_block(sock):
     if length <= 0:
         return None
     return recv_all(sock, length)
+
+def send_file(sock, filepath):
+    filename = os.path.basename(filepath)
+    filesize = os.path.getsize(filepath)
+
+    send_block(sock, b"FILE")
+    send_block(sock, filename.encode())
+    send_block(sock, filesize.to_bytes(8, "big"))
+
+    with open(filepath, "rb") as f:
+        while chunk := f.read(4096):
+            sock.sendall(chunk)
+
+    print("[Client] File sent")
+
+
+def receive_file(sock, sender_email):
+    # filename
+    filename = recv_block(sock).decode()
+    filesize = int.from_bytes(recv_block(sock), "big")
+
+    os.makedirs("received_files", exist_ok=True)
+    path = os.path.join("received_files", filename)
+
+    received = 0
+    with open(path, "wb") as f:
+        while received < filesize:
+            chunk = sock.recv(min(4096, filesize - received))
+            if not chunk:
+                break
+            f.write(chunk)
+            received += len(chunk)
+
+    print(f"[File] Received {filename} from {sender_email}")
+
 
 # Mutual-consent protocol (server side)
 def handle_request(client_socket):
@@ -198,93 +233,110 @@ def handle_request(client_socket):
     except Exception:
         # silent on purpose; caller code previously relied on silent failures
         return
-    finally:
-        try:
-            client_socket.close()
-        except:
-            pass
+    # AFTER mutual authentication succeeds
+    while True:
+            cmd = recv_block(client_socket)
+            if not cmd:
+                break
+
+            if cmd == b"FILE":
+                receive_file(client_socket, their_email)
+
+            elif cmd == b"QUIT":
+                break
 
 
 # Client-side mutual exchange (for discovery)
 def check_contact_certificate_exchange(ip, port):
-
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(3)
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(3)
-            sock.connect((ip, port))
+        sock.connect((ip, port))
 
-            # Step 1: receive nonce
-            nonce = recv_block(sock)
-            if not nonce:
-                return None
+        # Step 1: receive nonce
+        nonce = recv_block(sock)
+        if not nonce:
+            sock.close()
+            return None
 
-            # Step 2: sign nonce and send signed_nonce and our certificate
-            signature = sign_bytes(nonce, session.private_key)
-            send_block(sock, signature)
+        # Step 2: sign nonce and send signed_nonce and our certificate
+        signature = sign_bytes(nonce, session.private_key)
+        send_block(sock, signature)
 
-            our_cert_path = f"data/certificate/{session.email}.crt"
-            if not os.path.exists(our_cert_path):
-                return None
-            with open(our_cert_path, "rb") as f:
-                cert_bytes = f.read()
-            send_block(sock, cert_bytes)
+        our_cert_path = f"data/certificate/{session.email}.crt"
+        if not os.path.exists(our_cert_path):
+            sock.close()
+            return None
+        with open(our_cert_path, "rb") as f:
+            cert_bytes = f.read()
+        send_block(sock, cert_bytes)
 
-            # Step 3: try to receive server certificate (server will only send if they have us in their contacts)
-            # If server did not have us in their contacts it likely closed; attempt to read may time out
-            serv_cert_bytes = recv_block(sock)
-            if not serv_cert_bytes:
-                return None
+        # Step 3: try to receive server certificate (server will only send if they have us in their contacts)
+        # If server did not have us in their contacts it likely closed; attempt to read may time out
+        serv_cert_bytes = recv_block(sock)
+        if not serv_cert_bytes:
+            sock.close()
+            return None
 
-            # Step 4: server signature over server email
-            serv_sig = recv_block(sock)
-            if not serv_sig:
-                return None
+        # Step 4: server signature over server email
+        serv_sig = recv_block(sock)
+        if not serv_sig:
+            sock.close()
+            return None
 
-            # decode and verify server certificate
-            try:
-                serv_cert_text = serv_cert_bytes.decode().strip()
-            except Exception:
-                return None
-            if not serv_cert_text.startswith("-----BEGIN CERTIFICATE-----"):
-                return None
+        # decode and verify server certificate
+        try:
+            serv_cert_text = serv_cert_bytes.decode().strip()
+        except Exception:
+            sock.close()
+            return None
+        if not serv_cert_text.startswith("-----BEGIN CERTIFICATE-----"):
+            sock.close()
+            return None
 
-            ca_public = load_ca_public_key()
-            if not verify_certificate_data(serv_cert_text, ca_public):
-                return None
+        ca_public = load_ca_public_key()
+        if not verify_certificate_data(serv_cert_text, ca_public):
+            sock.close()
+            return None
 
-            # Extract and validate server email
-            server_email = extract_email_from_cert(serv_cert_text)
+        # Extract and validate server email
+        server_email = extract_email_from_cert(serv_cert_text)
 
-            # Check for empty AND ensure it's a string
-            if not server_email or not isinstance(server_email, str):
-                return None
+        # Check for empty AND ensure it's a string
+        if not server_email or not isinstance(server_email, str):
+            sock.close()
+            return None
 
-            server_public_key = load_public_key_cert_from_text(serv_cert_text)
+        server_public_key = load_public_key_cert_from_text(serv_cert_text)
 
-            # Verify server signature over server_email
-            # Now safe to encode
-            server_email_bytes = server_email.encode()
-            if not verify_signature_bytes(server_email_bytes, serv_sig, server_public_key):
-                return None
+        # Verify server signature over server_email
+        # Now safe to encode
+        server_email_bytes = server_email.encode()
+        if not verify_signature_bytes(server_email_bytes, serv_sig, server_public_key):
+            sock.close()
+            return None
 
-            # Step 5: confirm mutual by checking our contacts and sending confirmation signature
-            my_contacts = load_contacts()
-            if server_email not in my_contacts:
-                # We don't have them; not mutual
-                return None
+        # Step 5: confirm mutual by checking our contacts and sending confirmation signature
+        my_contacts = load_contacts()
+        if server_email not in my_contacts:
+            sock.close()
+            # We don't have them; not mutual
+            return None
 
-            # Create confirmation signature over server_email
-            # Add safety check for session state
-            if not hasattr(session, 'private_key') or not session.private_key:
-                return None
+        # Create confirmation signature over server_email
+        # Add safety check for session state
+        if not hasattr(session, 'private_key') or not session.private_key:
+            sock.close()
+            return None
 
-            conf_sig = sign_bytes(server_email_bytes, session.private_key)
-            send_block(sock, conf_sig)
+        conf_sig = sign_bytes(server_email_bytes, session.private_key)
+        send_block(sock, conf_sig)
 
-            # If server verifies, we assume success and can return server_email
-            return server_email
+        # If server verifies, we assume success and can return server_email
+        return server_email, sock
 
     except Exception:
+        sock.close()
         return None
 
 
@@ -307,17 +359,17 @@ def search_for_contacts():
         return []
 
     likely_ports = range(12345, 12355)
-    results = set()
+    results = dict()
     threads = []
     lock = threading.Lock()
 
     def probe(ip, port):
         if port == SERVER_PORT:
             return
-        found = check_contact_certificate_exchange(ip, port)
-        if found:
+        email, foundSock = check_contact_certificate_exchange(ip, port)
+        if foundSock and email:
             with lock:
-                results.add(found)
+                results[email] = foundSock
 
     for ip in _get_local_ips():
         for port in likely_ports:
@@ -329,7 +381,7 @@ def search_for_contacts():
     for t in threads:
         t.join(timeout=1.5)
 
-    return list(results)
+    return results
 
 def start_background_scanner():
     threading.Thread(target=scanner, daemon=True).start()
@@ -344,13 +396,13 @@ def scanner():
         now = time.time()
 
         with _lists_lock:
-            for email in discovered:
+            for email in discovered.keys():
                 if email and email != session.email:
                     # only add if we know this contact in our local contacts
                     # (this prevents showing random discovered users)
                     my_contacts = load_contacts()
                     if email in my_contacts:
-                        online_contacts[email] = now
+                        online_contacts[email] = (discovered[email], now) # item is a list, with the first entry the live port, and the second entry the time
 
             # remove stale entries
             stale = [e for e, ts in online_contacts.items() if now - ts > OFFLINE_TIMEOUT]
