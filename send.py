@@ -14,11 +14,38 @@ def send_file():
     send file to port associated with that contact
     this way it uses the port already made for the handshake instead of having to go through handshake again
     """
-    contact_search.list_online_contacts()
+    #list out the online contacts for the user
+    if not contact_search.list_online_contacts():
+        #no online contacts were found, exit send()
+        print("cannot send when there are no contacts online")
+        return
+    #get the contact the user would like to send to
     receiver_email = input("please enter the email you would like to send to: ").strip().lower()
+    #get valid input from the user
     while receiver_email not in contact_search.online_contacts.keys():
-        receiver_email = input("sorry that is not a recognized email of an online contact, please enter a valid email")
+        if receiver_email == "exit":
+            #let the user have some way to escape
+            return
+        else:
+            #ask them for a valid email
+            receiver_email = input("sorry that is not a recognized email of an online contact, please enter a valid email: ")
     sender_email = session.email #my email
+    #FIXME only can look in the working directory for the file, maybe add control flow to look in any path, likely unnecessary
+    #get the file that we want to send
+    file_name = input("what is the name of the file you would like to send?")
+    #make sure it's a valid filepath
+    while not os.path.isfile(file_name):
+        #while it is not a valid file
+        if file_name == "exit":
+            #allow the user a way out
+            return
+        else:
+            file_name = input("unable to find file, please enter a valid file name: ")
+
+    #> have the contact email, the file to send, now I just send it right?
+
+
+
 
 """
     #get list of online contacts

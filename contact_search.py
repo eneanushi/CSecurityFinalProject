@@ -28,7 +28,7 @@ def cleanup_server():
     _shutdown_event.set()  # tell threads to exit
     global server
     with _server_lock:
-        if server:
+        if server is not None:
             try:
                 server.close()
             except Exception:
@@ -141,6 +141,7 @@ def recv_block(sock):
 def send_file(sock, filepath):
     """sends the file at filepath using sock
     send the file at filepath using the sock socket that is passed in, sock should already be connected to another socket
+    assumes valid filepath and connected socket
     Args:
         sock (socket): the socket to send the file from
         filepath (string): string of the filepath to the file to be sent
@@ -501,28 +502,30 @@ def scanner():
 
 # List online (mutual) contacts
 def list_online_contacts():
-    """lists the online mutual contacts, and lists them as well as how long since last connected"""
+    """lists the online mutual contacts, and lists them as well as how long since last connected
+    Returns:
+        false if none online
+        true if there are contacts online
+        """
     with _lists_lock:
         if not online_contacts:
+            #no online contacts
             print("No mutual contacts currently online")
-            return
-
-        my_contacts = load_contacts()
-        now = time.time()
-
+            return False
+        my_contacts = load_contacts() #load my contacts
+        now = time.time() #get now for the timestamp
         print("Online contacts (mutual only):")
         for email, info in sorted(online_contacts.items()):
             if email not in my_contacts:
                 continue
-
             # Handle both old float entries and new tuple entries
             if isinstance(info, tuple) and len(info) == 2:
                 _, last_seen = info
             else:
                 # fallback for old float-only entries
                 last_seen = info
-
             name = my_contacts[email].get("full_name", email)
             age = int(now - last_seen)
             print(f"* {name} ({email}) — last seen {age}s ago")
-
+    #only gets here if there were online contacts found
+    return True
