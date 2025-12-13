@@ -7,6 +7,7 @@ from contact_search import server
 
 def send_file():
     """
-    take in the destination port
-    make a port to send the
+    choose from available online contacts
+    choose file to send
+    send file to port associated with that contact
     """

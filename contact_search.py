@@ -53,7 +53,7 @@ def run_server():
             #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #this was causing it to just use the same port
             s.bind((HOST, port))
             s.listen(5)
-            s.settimeout(1)
+            #s.settimeout(1)
             SERVER_PORT = port
             print(f"[Server] Listening on port: {port}")
             break
@@ -419,7 +419,18 @@ def scanner():
                 if email in my_contacts:
                     online_contacts[email] = (sock, now)
 
-            stale = [e for e, (_, ts) in online_contacts.items() if now - ts > OFFLINE_TIMEOUT]
+            stale = []
+
+            for email, info in online_contacts.items():
+                if isinstance(info, tuple) and len(info) == 2:
+                    _, ts = info
+                else:
+                    # legacy float-only entry
+                    ts = info
+
+                if now - ts > OFFLINE_TIMEOUT:
+                    stale.append(email)
+
             for e in stale:
                 online_contacts.pop(e, None)
 
