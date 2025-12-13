@@ -427,9 +427,18 @@ def list_online_contacts():
         now = time.time()
 
         print("Online contacts (mutual only):")
-        for email, (_, last_seen) in sorted(online_contacts.items()):
+        for email, info in sorted(online_contacts.items()):
             if email not in my_contacts:
                 continue
+
+            # Handle both old float entries and new tuple entries
+            if isinstance(info, tuple) and len(info) == 2:
+                _, last_seen = info
+            else:
+                # fallback for old float-only entries
+                last_seen = info
+
             name = my_contacts[email].get("full_name", email)
             age = int(now - last_seen)
             print(f"* {name} ({email}) — last seen {age}s ago")
+
