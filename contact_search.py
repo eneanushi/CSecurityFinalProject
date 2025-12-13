@@ -15,6 +15,8 @@ _server_lock = threading.Lock()
 _lists_lock = threading.Lock()
 SERVER_PORT = None
 server = None
+_shutdown_event = threading.Event()
+
 
 SCAN_INTERVAL = 5
 OFFLINE_TIMEOUT = 10  
@@ -22,6 +24,7 @@ OFFLINE_TIMEOUT = 10
 
 # Server cleanup on exit
 def cleanup_server():
+    _shutdown_event.set()  # tell threads to exit
     global server
     with _server_lock:
         if server:
@@ -29,6 +32,7 @@ def cleanup_server():
                 server.close()
             except Exception:
                 pass
+
 #assign cleanup_server() to be run at program termination
 atexit.register(cleanup_server)
 
@@ -49,6 +53,7 @@ def run_server():
             #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #this was causing it to just use the same port
             s.bind((HOST, port))
             s.listen(5)
+            s.settimeout(1)
             SERVER_PORT = port
             print(f"[Server] Listening on port: {port}")
             break
@@ -64,7 +69,7 @@ def run_server():
         server = s
 
     try:
-        while True:
+        while not _shutdown_event.is_set(): #this is changed so the threads don't hang and the program exits
             try:
                 client_socket, _ = server.accept()
                 threading.Thread(target=handle_request, args=(client_socket,), daemon=True).start()
@@ -74,11 +79,13 @@ def run_server():
                 continue
     finally:
         with _server_lock:
-            try:
-                if server:
+            if server:
+                try:
                     server.close()
-            except: pass
+                except:
+                    pass
             server = None
+
 
 # receive all
 def recv_all(sock, n):
@@ -86,8 +93,8 @@ def recv_all(sock, n):
     while len(data) < n:
         try:
             packet = sock.recv(n - len(data))
-        except socket.timeout:
-            return None  # timed out
+        except (socket.timeout, ConnectionResetError):
+            return None
         if not packet:
             return None
         data += packet
@@ -98,14 +105,18 @@ def recv_all(sock, n):
 def send_block(sock, data: bytes):
     sock.sendall(len(data).to_bytes(4, "big") + data)
 
+#receive block of data
 def recv_block(sock):
-    len_bytes = recv_all(sock, 4)
-    if not len_bytes:
+    try:
+        len_bytes = recv_all(sock, 4)
+        if not len_bytes:
+            return None
+        length = int.from_bytes(len_bytes, "big")
+        if length <= 0:
+            return None
+        return recv_all(sock, length)
+    except (socket.timeout, ConnectionResetError):
         return None
-    length = int.from_bytes(len_bytes, "big")
-    if length <= 0:
-        return None
-    return recv_all(sock, length)
 
 def send_file(sock, filepath):
     filename = os.path.basename(filepath)
@@ -132,8 +143,12 @@ def receive_file(sock, sender_email):
 
     received = 0
     with open(path, "wb") as f:
+        received = 0
         while received < filesize:
-            chunk = sock.recv(min(4096, filesize - received))
+            try:
+                chunk = sock.recv(min(4096, filesize - received))
+            except (socket.timeout, ConnectionResetError):
+                break
             if not chunk:
                 break
             f.write(chunk)
@@ -236,7 +251,7 @@ def handle_request(client_socket):
         # silent on purpose; caller code previously relied on silent failures
         return
     # AFTER mutual authentication succeeds
-    while True:
+    while not _shutdown_event.is_set():
             cmd = recv_block(client_socket)
             if not cmd:
                 break
@@ -391,8 +406,7 @@ def start_background_scanner():
     threading.Thread(target=scanner, daemon=True).start()
 
 def scanner():
-    while True:
-
+    while not _shutdown_event.is_set():
         if not session.email:
             time.sleep(SCAN_INTERVAL)
             continue
@@ -400,20 +414,17 @@ def scanner():
         now = time.time()
 
         with _lists_lock:
-            for email in discovered.keys():
-                if email and email != session.email:
-                    # only add if we know this contact in our local contacts
-                    # (this prevents showing random discovered users)
-                    my_contacts = load_contacts()
-                    if email in my_contacts:
-                        online_contacts[email] = (discovered[email], now) # item is a list, with the first entry the live port, and the second entry the time
+            for email, sock in discovered.items():
+                my_contacts = load_contacts()
+                if email in my_contacts:
+                    online_contacts[email] = (sock, now)
 
-            # remove stale entries
             stale = [e for e, (_, ts) in online_contacts.items() if now - ts > OFFLINE_TIMEOUT]
             for e in stale:
                 online_contacts.pop(e, None)
 
         time.sleep(SCAN_INTERVAL)
+
 
 # List online (mutual) contacts
 def list_online_contacts():

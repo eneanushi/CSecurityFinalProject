@@ -65,7 +65,9 @@ def main():
 
         elif command == "exit":
             session.clear()
-            break
+            from contact_search import cleanup_server
+            cleanup_server()  # signal server/scanner threads to stop
+            return
 
         else:
             print(f'Unknown command: "{command}". Type "help" for commands.')
