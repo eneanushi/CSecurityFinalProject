@@ -24,6 +24,7 @@ OFFLINE_TIMEOUT = 10
 
 # Server cleanup on exit
 def cleanup_server():
+    """cleans up the server at program end"""
     _shutdown_event.set()  # tell threads to exit
     global server
     with _server_lock:
@@ -39,11 +40,15 @@ atexit.register(cleanup_server)
 
 # Server start / accept loop
 def start_server():
+    """starts the listening server thread"""
     if not session.email:
         return
     threading.Thread(target=run_server, daemon=True).start()
 
 def run_server():
+    """runs the server
+    the function that actually runs the listening server, looks for an open port binds to the open port, then listens on the port and waits running handle_request()
+    no Return"""
     global server, SERVER_PORT
     HOST = "0.0.0.0"
     s = None
@@ -89,6 +94,14 @@ def run_server():
 
 # receive all
 def recv_all(sock, n):
+    """receive all
+    receives all data from sock
+    Args:
+        sock (socket): socket to receive from
+         n (int): block size to receive the data in
+    Returns:
+        returns the data taken in from the socket
+        """
     data = b""
     while len(data) < n:
         try:
@@ -103,6 +116,12 @@ def recv_all(sock, n):
 
 # Framing helpers (length-prefixed)
 def send_block(sock, data: bytes):
+    """send a block of data from sock
+    sends a block of data
+    Args:
+        sock (socket): socket to send the data from
+        data (bytes): bytes stream of data to be sent
+    """
     sock.sendall(len(data).to_bytes(4, "big") + data)
 
 #receive block of data
@@ -118,7 +137,16 @@ def recv_block(sock):
     except (socket.timeout, ConnectionResetError):
         return None
 
+
 def send_file(sock, filepath):
+    """sends the file at filepath using sock
+    send the file at filepath using the sock socket that is passed in, sock should already be connected to another socket
+    Args:
+        sock (socket): the socket to send the file from
+        filepath (string): string of the filepath to the file to be sent
+    Returns:
+        none
+    """
     filename = os.path.basename(filepath)
     filesize = os.path.getsize(filepath)
 
@@ -134,6 +162,16 @@ def send_file(sock, filepath):
 
 
 def receive_file(sock, sender_email):
+    """receives a file from sock, and says the sender once received
+
+    receives a file from the passed in socket, and saves the file in 'received_files' directory
+
+    Args:
+        sock (socket): socket to receive the file from
+        sender_email (string): the email of the sender, to be printed out
+    Returns:
+        none
+        """
     # filename
     filename = recv_block(sock).decode()
     filesize = int.from_bytes(recv_block(sock), "big")
@@ -159,7 +197,15 @@ def receive_file(sock, sender_email):
 
 # Mutual-consent protocol (server side)
 def handle_request(client_socket):
-   
+    """runs authentication between the sever and the client socket, then listens
+
+    performs the authentication handshake betweeen server and the client socket, then listens on the socket to receive
+
+    Args:
+       client_socket (socket): the client socket to be authenticated on and then listened to
+    Returns:
+        none
+       """
     their_email = None
     try:
         client_socket.settimeout(6)
@@ -265,6 +311,20 @@ def handle_request(client_socket):
 
 # Client-side mutual exchange (for discovery)
 def check_contact_certificate_exchange(ip, port):
+    """client side mutual authentication
+
+    attempts the client side mutual authentication of handle_request(), creates a socket and connects to the passed in ip and port
+    performs the mutual authentication, then returns the server email and the connected socket if successful
+
+    Args:
+        ip (string): ip to connect to with the created socket
+        port (int): the port to connect to with the created socket
+    Returns:
+        success: (server_email, sock)
+            server_email (string): the email of the server the socket connected to
+            sock (socket): the live socket connected to the server
+        failure: None
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(3)
     try:
@@ -349,7 +409,7 @@ def check_contact_certificate_exchange(ip, port):
         conf_sig = sign_bytes(server_email_bytes, session.private_key)
         send_block(sock, conf_sig)
 
-        # If server verifies, we assume success and can return server_email
+        # If server verifies, we assume success and can return server_email and connected socket
         return server_email, sock
 
     except Exception:
@@ -403,9 +463,11 @@ def search_for_contacts():
     return results
 
 def start_background_scanner():
+    """starts the background scanner threads"""
     threading.Thread(target=scanner, daemon=True).start()
 
 def scanner():
+    """scans for online known contacts, and the time they were last connected to"""
     while not _shutdown_event.is_set():
         if not session.email:
             time.sleep(SCAN_INTERVAL)
@@ -419,13 +481,13 @@ def scanner():
                 if email in my_contacts:
                     online_contacts[email] = (sock, now)
 
+            #handle stale connections for security
             stale = []
 
             for email, info in online_contacts.items():
                 if isinstance(info, tuple) and len(info) == 2:
                     _, ts = info
                 else:
-                    # legacy float-only entry
                     ts = info
 
                 if now - ts > OFFLINE_TIMEOUT:
@@ -439,6 +501,7 @@ def scanner():
 
 # List online (mutual) contacts
 def list_online_contacts():
+    """lists the online mutual contacts, and lists them as well as how long since last connected"""
     with _lists_lock:
         if not online_contacts:
             print("No mutual contacts currently online")

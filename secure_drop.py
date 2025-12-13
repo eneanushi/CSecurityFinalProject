@@ -5,6 +5,7 @@ from user_login import login_user, session
 from contacts import add_contact
 from contact_search import start_server, start_background_scanner, list_online_contacts
 from first_time_setup import first_time_setup
+from send import send_file
 
 def main():
     os.makedirs("data", exist_ok=True)
@@ -62,6 +63,7 @@ def main():
 
         elif command == "send":
             print("Not implemented yet (Milestone 5)")
+            send_file()
 
         elif command == "exit":
             session.clear()
