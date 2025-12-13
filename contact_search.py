@@ -183,10 +183,11 @@ def receive_file(sock, sender_email):
     filename = recv_block(sock).decode()
     filesize = int.from_bytes(recv_block(sock), "big")
 
-    os.makedirs("received_files", exist_ok=True)
-    path = os.path.join("received_files", filename)
+    os.makedirs(f"received_files{session.full_name}", exist_ok=True) #TODO change made so that each user has their own received directory
+    path = os.path.join(f"received_files{session.full_name}", filename)
 
     received = 0
+
     with open(path, "wb") as f:
         received = 0
         while received < filesize:
@@ -294,9 +295,11 @@ def handle_request(client_socket):
                 break
 
             if cmd == b"FILE":
+                print("file command received") #FIXME debugging
                 receive_file(client_socket, their_email)
 
             elif cmd == b"QUIT":
+                print("quit command received") #FIXME debugging
                 break
 
     except Exception as e:
