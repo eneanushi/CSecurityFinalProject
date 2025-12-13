@@ -10,12 +10,12 @@ from contacts import load_contacts
 from crypto_utils import *
 
 # Globals
-online_contacts = {}       
+online_contacts = {}  #dict { contact_email : (connected_client_socket, time_connected) }
 _server_lock = threading.Lock()
 _lists_lock = threading.Lock()
 SERVER_PORT = None
 server = None
-_shutdown_event = threading.Event()
+_shutdown_event = threading.Event() #event to extra triple make sure threads shut down
 
 
 SCAN_INTERVAL = 5
@@ -117,12 +117,17 @@ def recv_all(sock, n):
 # Framing helpers (length-prefixed)
 def send_block(sock, data: bytes):
     """send a block of data from sock
-    sends a block of data
+    attempts to send a block of data from sock
     Args:
         sock (socket): socket to send the data from
         data (bytes): bytes stream of data to be sent
     """
-    sock.sendall(len(data).to_bytes(4, "big") + data)
+    if not isinstance(data, (bytes, bytearray)):
+        return
+    try:
+        sock.sendall(len(data).to_bytes(4, "big") + data)
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return
 
 #receive block of data
 def recv_block(sock):
@@ -138,24 +143,23 @@ def recv_block(sock):
         return None
 
 
-def send_file(sock, filepath):
+def send_file(sock, filename):
     """sends the file at filepath using sock
     send the file at filepath using the sock socket that is passed in, sock should already be connected to another socket
     assumes valid filepath and connected socket
     Args:
         sock (socket): the socket to send the file from
-        filepath (string): string of the filepath to the file to be sent
+        filename (string): name of the file to send
     Returns:
         none
     """
-    filename = os.path.basename(filepath)
-    filesize = os.path.getsize(filepath)
+    filesize = os.path.getsize(filename)
 
     send_block(sock, b"FILE")
     send_block(sock, filename.encode())
     send_block(sock, filesize.to_bytes(8, "big"))
 
-    with open(filepath, "rb") as f:
+    with open(filename, "rb") as f:
         while chunk := f.read(4096):
             sock.sendall(chunk)
 
@@ -200,7 +204,7 @@ def receive_file(sock, sender_email):
 def handle_request(client_socket):
     """runs authentication between the sever and the client socket, then listens
 
-    performs the authentication handshake betweeen server and the client socket, then listens on the socket to receive
+    performs the authentication handshake between server and the client socket, then listens on the socket to receive
 
     Args:
        client_socket (socket): the client socket to be authenticated on and then listened to
@@ -292,7 +296,8 @@ def handle_request(client_socket):
 
         # Mutual confirmed: mark them online
         with _lists_lock:
-            online_contacts[their_email] = time.time()
+            #add the email to online contacts, with the connected socket and the time connected
+            online_contacts[their_email] = (client_socket, time.time())
 
     except Exception:
         # silent on purpose; caller code previously relied on silent failures
@@ -304,10 +309,12 @@ def handle_request(client_socket):
                 break
 
             if cmd == b"FILE":
+                print(f"received a file send cmd from {their_email}")
                 receive_file(client_socket, their_email)
 
             elif cmd == b"QUIT":
                 break
+
 
 
 # Client-side mutual exchange (for discovery)
@@ -477,10 +484,10 @@ def scanner():
         now = time.time()
 
         with _lists_lock:
-            for email, sock in discovered.items():
+            for email in discovered.keys():
                 my_contacts = load_contacts()
                 if email in my_contacts:
-                    online_contacts[email] = (sock, now)
+                    online_contacts[email] = (discovered[email], now)
 
             #handle stale connections for security
             stale = []
@@ -515,17 +522,11 @@ def list_online_contacts():
         my_contacts = load_contacts() #load my contacts
         now = time.time() #get now for the timestamp
         print("Online contacts (mutual only):")
-        for email, info in sorted(online_contacts.items()):
+        for email in online_contacts.keys():
             if email not in my_contacts:
                 continue
-            # Handle both old float entries and new tuple entries
-            if isinstance(info, tuple) and len(info) == 2:
-                _, last_seen = info
-            else:
-                # fallback for old float-only entries
-                last_seen = info
             name = my_contacts[email].get("full_name", email)
-            age = int(now - last_seen)
+            age = int(now - my_contacts[1])
             print(f"* {name} ({email}) — last seen {age}s ago")
     #only gets here if there were online contacts found
     return True
